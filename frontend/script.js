@@ -5,7 +5,7 @@ const API_URL = '/api';
 let currentSessionId = null;
 
 // DOM elements
-let chatMessages, chatInput, sendButton, totalCourses, courseTitles;
+let chatMessages, chatInput, sendButton, totalCourses, courseTitles, newChatButton;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
     sendButton = document.getElementById('sendButton');
     totalCourses = document.getElementById('totalCourses');
     courseTitles = document.getElementById('courseTitles');
+    newChatButton = document.getElementById('newChatButton');
     
     setupEventListeners();
     createNewSession();
@@ -29,6 +30,8 @@ function setupEventListeners() {
         if (e.key === 'Enter') sendMessage();
     });
     
+    // New chat button
+    newChatButton.addEventListener('click', handleNewChat);
     
     // Suggested questions
     document.querySelectorAll('.suggested-item').forEach(button => {
@@ -164,6 +167,25 @@ function escapeHtml(text) {
 }
 
 // Removed removeMessage function - no longer needed since we handle loading differently
+
+function handleNewChat() {
+    // Clear any pending input
+    chatInput.value = '';
+    
+    // Provide visual feedback
+    newChatButton.style.opacity = '0.5';
+    newChatButton.disabled = true;
+    
+    // Create new session
+    createNewSession();
+    
+    // Re-enable button after brief delay
+    setTimeout(() => {
+        newChatButton.style.opacity = '1';
+        newChatButton.disabled = false;
+        chatInput.focus();
+    }, 300);
+}
 
 async function createNewSession() {
     currentSessionId = null;
