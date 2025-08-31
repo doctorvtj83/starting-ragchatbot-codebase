@@ -96,3 +96,5 @@ Key settings in `config.py`:
 - Frontend displays loading states and error messages
 
 The system is designed for educational content with built-in course/lesson hierarchy preservation and context-aware search capabilities.
+- always use uv to run the server do not run pip directly
+- make sure to use uv to manage all dependencies
