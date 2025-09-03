@@ -167,8 +167,8 @@ class TestAIGenerator(unittest.TestCase):
         self.assertIn("Previous question", system_content)
         self.assertIn("Previous answer", system_content)
     
-    def test_multiple_tool_calls(self):
-        """Test handling of multiple tool calls in single response"""
+    def test_multiple_tool_calls_single_round(self):
+        """Test handling of multiple tool calls in single round"""
         mock_tools = [
             {
                 "name": "search_course_content",
@@ -214,6 +214,174 @@ class TestAIGenerator(unittest.TestCase):
             call("search_course_content", query="topic 2")
         ]
         mock_tool_manager.execute_tool.assert_has_calls(expected_calls)
+    
+    def test_sequential_tool_calls_two_rounds(self):
+        """Test sequential tool calling across two rounds"""
+        mock_tools = [
+            {
+                "name": "search_course_content",
+                "description": "Search course materials",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"]
+                }
+            }
+        ]
+        
+        mock_tool_manager = Mock()
+        mock_tool_manager.execute_tool.side_effect = [
+            "First search result about Python basics",
+            "Second search result about advanced Python"
+        ]
+        
+        # Round 1: Initial tool call
+        round1_response = MockAnthropicResponse(
+            content=[],
+            stop_reason="tool_use",
+            tool_calls=[{"name": "search_course_content", "input": {"query": "Python basics"}, "id": "call_1"}]
+        )
+        
+        # Round 2: Follow-up tool call
+        round2_response = MockAnthropicResponse(
+            content=[],
+            stop_reason="tool_use", 
+            tool_calls=[{"name": "search_course_content", "input": {"query": "advanced Python"}, "id": "call_2"}]
+        )
+        
+        # Final response after 2 rounds
+        final_response = MockAnthropicResponse("Based on both searches, here's a comprehensive comparison of Python topics")
+        
+        self.mock_anthropic_client.messages.create.side_effect = [
+            round1_response, round2_response, final_response
+        ]
+        
+        result = self.ai_generator.generate_response(
+            "Compare Python basics with advanced topics",
+            tools=mock_tools,
+            tool_manager=mock_tool_manager
+        )
+        
+        # Verify we made 3 API calls total (initial + round2 + final)
+        self.assertEqual(self.mock_anthropic_client.messages.create.call_count, 3)
+        
+        # Verify both tools were executed sequentially
+        self.assertEqual(mock_tool_manager.execute_tool.call_count, 2)
+        expected_calls = [
+            call("search_course_content", query="Python basics"),
+            call("search_course_content", query="advanced Python")
+        ]
+        mock_tool_manager.execute_tool.assert_has_calls(expected_calls)
+        
+        # Verify final response
+        self.assertIn("comprehensive comparison", result)
+    
+    def test_sequential_tool_calls_max_rounds_limit(self):
+        """Test that sequential tool calling stops at max rounds limit"""
+        mock_tools = [{"name": "search_course_content", "description": "Search", "input_schema": {}}]
+        mock_tool_manager = Mock()
+        mock_tool_manager.execute_tool.side_effect = ["Result 1", "Result 2"]
+        
+        # Both rounds return tool_use responses
+        round1_response = MockAnthropicResponse(
+            content=[], stop_reason="tool_use",
+            tool_calls=[{"name": "search_course_content", "input": {"query": "query1"}, "id": "call_1"}]
+        )
+        round2_response = MockAnthropicResponse(
+            content=[], stop_reason="tool_use",
+            tool_calls=[{"name": "search_course_content", "input": {"query": "query2"}, "id": "call_2"}]
+        )
+        final_response = MockAnthropicResponse("Final synthesized response")
+        
+        self.mock_anthropic_client.messages.create.side_effect = [
+            round1_response, round2_response, final_response
+        ]
+        
+        result = self.ai_generator.generate_response(
+            "Complex query requiring multiple steps",
+            tools=mock_tools,
+            tool_manager=mock_tool_manager
+        )
+        
+        # Should execute exactly 2 rounds (max_rounds=2) then stop
+        self.assertEqual(mock_tool_manager.execute_tool.call_count, 2)
+        # Should make 3 API calls: round1, round2, final
+        self.assertEqual(self.mock_anthropic_client.messages.create.call_count, 3)
+        
+        self.assertEqual(result, "Final synthesized response")
+    
+    def test_sequential_tool_calls_early_termination(self):
+        """Test that sequential tool calling stops when Claude doesn't use tools"""
+        mock_tools = [{"name": "search_course_content", "description": "Search", "input_schema": {}}]
+        mock_tool_manager = Mock()
+        mock_tool_manager.execute_tool.return_value = "Search result"
+        
+        # Round 1: Uses tool
+        round1_response = MockAnthropicResponse(
+            content=[], stop_reason="tool_use",
+            tool_calls=[{"name": "search_course_content", "input": {"query": "query"}, "id": "call_1"}]
+        )
+        
+        # Round 2: Doesn't use tools (stop_reason="end_turn")
+        round2_response = MockAnthropicResponse("Direct answer without more tools", stop_reason="end_turn")
+        
+        self.mock_anthropic_client.messages.create.side_effect = [round1_response, round2_response]
+        
+        result = self.ai_generator.generate_response(
+            "Simple query",
+            tools=mock_tools,
+            tool_manager=mock_tool_manager
+        )
+        
+        # Should execute only 1 tool call, then stop when Claude doesn't use tools in round 2
+        self.assertEqual(mock_tool_manager.execute_tool.call_count, 1)
+        # Should make only 2 API calls: round1, round2 (no final call needed)
+        self.assertEqual(self.mock_anthropic_client.messages.create.call_count, 2)
+        
+        self.assertEqual(result, "Direct answer without more tools")
+    
+    def test_sequential_tool_calls_error_handling(self):
+        """Test error handling in sequential tool calling"""
+        mock_tools = [{"name": "search_course_content", "description": "Search", "input_schema": {}}]
+        mock_tool_manager = Mock()
+        mock_tool_manager.execute_tool.return_value = "Search result"
+        
+        # Round 1: Successful
+        round1_response = MockAnthropicResponse(
+            content=[], stop_reason="tool_use",
+            tool_calls=[{"name": "search_course_content", "input": {"query": "query"}, "id": "call_1"}]
+        )
+        
+        # Mock final response to also fail
+        final_response = MockAnthropicResponse("Fallback response after error")
+        
+        # Round 2: API call fails, but final response succeeds
+        self.mock_anthropic_client.messages.create.side_effect = [
+            round1_response,
+            Exception("API error in round 2"),
+            final_response
+        ]
+        
+        with patch('builtins.print') as mock_print:
+            result = self.ai_generator.generate_response(
+                "Query that causes error",
+                tools=mock_tools,
+                tool_manager=mock_tool_manager
+            )
+        
+        # Should execute first tool call successfully
+        self.assertEqual(mock_tool_manager.execute_tool.call_count, 1)
+        
+        # Should print error message (check for either error type)
+        mock_print.assert_called()
+        error_message = mock_print.call_args[0][0]
+        self.assertTrue(
+            "Error in tool execution round" in error_message or 
+            "Error in final response generation" in error_message
+        )
+        
+        # Should still provide a response
+        self.assertIsNotNone(result)
     
     def test_tool_execution_error_handling(self):
         """Test handling of tool execution errors"""
