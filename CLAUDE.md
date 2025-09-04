@@ -22,6 +22,20 @@ uv sync
 uv add package_name
 ```
 
+### Code Quality & Formatting
+```bash
+# Format code with black
+./scripts/format.sh
+uv run black .
+
+# Check code formatting without changes
+./scripts/check-format.sh
+uv run black --check --diff .
+
+# Run comprehensive quality checks
+./scripts/quality-check.sh
+```
+
 ### Environment Setup
 - Create `.env` file with `ANTHROPIC_API_KEY=your_key_here`
 - Application runs on http://localhost:8000
